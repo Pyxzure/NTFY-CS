@@ -4,6 +4,10 @@
 await Client.Publish("topic", "message");
 
 //Add some headers, publish to a self-hosted server, capture the response
+string svr = "https://my.server:8080";
+string user = "user";
+string psw = "psw";
+string token = "tk_token";
 Header hdr = new()
 {
     Click = "http://www.google.com",
@@ -11,19 +15,19 @@ Header hdr = new()
     Priority = 5
 };
 hdr.AddViewAction("To X!", "http://www.x.com");
-NMessage re = await Client.Publish("topic", "message2", "user", "psw", hdr, "https://my.server:8080");
+NMessage re = await Client.Publish("topic", "message2", user, psw, hdr, svr);
 Console.WriteLine(re.Id); //Gets the ID of the message
 
 //Or set the default server and auth token to simplify Publish call
-Client.SetServer("https://my.server:8080");
-Client.SetAuthentication("tk_token");
+Client.SetServer(svr);
+Client.SetAuthentication(token);
 await Client.Publish("topic", "message3", hdr);
 
 //Start a server to subscribe to messages
 
-Server Svr = new("topic", "token", "https://my.server:8080");
+Server Svr = new("topic", token, svr);
 Svr.NewNotification += CallBack; //Attach an event handler
-Svr.Start();
+Task t = Svr.Start(true); //Start listening with auto reconnect
 
 await Task.Delay(100000);
 

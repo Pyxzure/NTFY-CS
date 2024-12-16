@@ -1,6 +1,6 @@
 ﻿using System.Text;
-using Newtonsoft.Json;
 using System.Diagnostics;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace NTFY
@@ -65,9 +65,13 @@ namespace NTFY
         }
     }
 
+    /// <summary>
+    /// The Server class for subscribing to messages. Attach to the event handler NewNotification to act on new messages. Await on the Start() method to start listening, and call the Stop() method to end.
+    /// </summary>
     public class Server
     {
         public event EventHandler<NotiEventArgs>? NewNotification;
+        public event EventHandler<DCEventArgs>? Disconnected;
 
         private readonly string endpoint;
         private readonly string? token;
@@ -86,15 +90,31 @@ namespace NTFY
             this.endpoint = server + (server[^1] != '/' ? "/" : "") + topic + "/json";
             this.token = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(username + ":" + password));
         }
-        public void Start()
+        /// <summary>
+        /// Start listening
+        /// </summary>
+        /// <param name="reconnect">If set to true, will automatically reconnect when disconnected for any reasons except calling Stop(). Disconnect event will be called with the Exception as the EventArg. Will not attempt to reconnect if set to false, and any exceptions will be re-thrown.</param>
+        async public Task Start(bool reconnect = false)
         {
             if (!Listening)
             {
                 cts = new CancellationTokenSource();
                 ctoken = cts.Token;
-
-                Task t = Listen();
                 Listening = true;
+                while (reconnect && Listening && !ctoken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await Listen();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine(ex);
+                        if (!reconnect) throw;
+                        OnDisconnected(new(ex));
+                    }
+                    await Task.Delay(1000);
+                }
             }
         }
         public void Stop()
@@ -117,21 +137,23 @@ namespace NTFY
                 string? o = await streamReader.ReadLineAsync().ConfigureAwait(false);
                 if (o is not null)
                 {
-                    try
-                    {
-                        NMessage obj = JsonConvert.DeserializeObject<NMessage>(o)!;
-                        OnNewNotification(obj);
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine(ex);
-                    }
+                    NMessage obj = JsonConvert.DeserializeObject<NMessage>(o)!;
+                    OnNewNotification(new NotiEventArgs(obj));
+                }
+                else
+                {
+                    throw new InvalidOperationException("Stream closed");
                 }
             }
+            throw new OperationCanceledException("Task cancelled");
         }
-        protected virtual void OnNewNotification(NMessage e)
+        protected virtual void OnNewNotification(NotiEventArgs e)
         {
-            NewNotification?.Invoke(this, new NotiEventArgs(e));
+            NewNotification?.Invoke(this, e);
+        }
+        protected virtual void OnDisconnected(DCEventArgs e)
+        {
+            Disconnected?.Invoke(this, e);
         }
     }
     public class Header
@@ -223,12 +245,27 @@ namespace NTFY
             return output;
         }
     }
+
+    /// <summary>
+    /// The event args for the new message notification. Extract the Message parameter to ge the NMessage object
+    /// </summary>
     public class NotiEventArgs : EventArgs
     {
         public NMessage Message { get; init; }
         public NotiEventArgs(NMessage Message)
         {
             this.Message = Message;
+        }
+    }
+    /// <summary>
+    /// The event args for the Disconnect event. Stores the Exception causing the Disconnect event.
+    /// </summary>
+    public class DCEventArgs : EventArgs
+    {
+        public Exception? Exception { get; init; }
+        public DCEventArgs(Exception? Exception)
+        {
+            this.Exception = Exception;
         }
     }
     public class NMessage
